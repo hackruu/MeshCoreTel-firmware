@@ -26,7 +26,7 @@ constexpr size_t kWebCommandBufferSize = 192;
 constexpr size_t kWebReplyBufferSize = 256;
 constexpr size_t kWebStatsQueryBufferSize = 96;
 constexpr size_t kWebStatsReplyBufferSize = 4608;
-constexpr size_t kWebPageChunkSize = 768;
+constexpr size_t kWebPageChunkSize = MBEDTLS_SSL_OUT_CONTENT_LEN;
 constexpr unsigned long kWebIdleTimeoutMs = WEB_PANEL_IDLE_TIMEOUT_MS;
 
 #if defined(MQTT_DEBUG) && MQTT_DEBUG
