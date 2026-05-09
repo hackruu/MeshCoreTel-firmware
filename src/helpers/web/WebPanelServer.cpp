@@ -609,15 +609,15 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
       <div class="stack">
         <div class="row">
           <div class="field-card">
-            <label class="label" for="versionValue">Version</label>
+            <label class="label" for="hardware">Hardware</label>
             <div class="fieldline">
-              <input id="versionValue" readonly disabled>
+              <input id="hardware" readonly disabled>
             </div>
           </div>
           <div class="field-card">
-            <label class="label" for="clientVersionValue">Client Version</label>
+            <label class="label" for="firmware">Firmware</label>
             <div class="fieldline">
-              <input id="clientVersionValue" readonly disabled>
+              <input id="firmware" readonly disabled>
             </div>
           </div>
         </div>
@@ -2516,8 +2516,8 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
       const quiet = { recordHistory:false, updateInput:false };
       try {
         await loadSection("Loading info...", [
-          () => loadField("ver", "versionValue", null, quiet),
-          () => loadField("get mqtt.client_version", "clientVersionValue", null, quiet),
+          () => loadField("board", "hardware", null, quiet),
+          () => loadField("ver", "firmware", null, quiet),
           () => loadField("clock", "clockUtc", null, quiet),
           () => loadField("get public.key", "publicKey", "uppercase", quiet)
         ]);
