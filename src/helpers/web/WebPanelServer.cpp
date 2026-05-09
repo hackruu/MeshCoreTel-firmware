@@ -1543,27 +1543,27 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
       </section>`;
     }
     function renderPacketsCard(packets) {
-      const sent = packets.sent || 0;
       const recv = packets.recv || 0;
-      const floodTx = packets.flood_tx || 0;
-      const directTx = packets.direct_tx || 0;
+      const sent = packets.sent || 0;
       const floodRx = packets.flood_rx || 0;
       const directRx = packets.direct_rx || 0;
       const recvErrors = packets.recv_errors || 0;
       const totalAttempts = recv + recvErrors;
       const errorRatePct = pctRatio(recvErrors, totalAttempts);
+      const floodTx = packets.flood_tx || 0;
+      const directTx = packets.direct_tx || 0;
       return `<section class="hud-card">
         <h3>Packets</h3>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;min-width:0">
-          ${renderMeter("TX Flood Share", Math.round(pctRatio(floodTx, sent)) + "%", pctRatio(floodTx, sent), "", false)}
           ${renderMeter("RX Flood Share", Math.round(pctRatio(floodRx, recv)) + "%", pctRatio(floodRx, recv), "", false)}
+          ${renderMeter("TX Flood Share", Math.round(pctRatio(floodTx, sent)) + "%", pctRatio(floodTx, sent), "", false)}
         </div>
         ${renderMeter("RX Error Rate", Math.round(errorRatePct) + "%", errorRatePct, recvErrors + " errors / " + totalAttempts + " attempts", false)}
         <div class="metric-grid">
-          ${renderMetric("Sent", sent)}
           ${renderMetric("Recv", recv)}
-          ${renderMetric("TX Direct", directTx)}
+          ${renderMetric("Sent", sent)}
           ${renderMetric("RX Direct", directRx)}
+          ${renderMetric("TX Direct", directTx)}
           ${renderMetric("Recv Errors", packets.recv_errors || 0)}
           ${renderMetric("Balance", recv - sent)}
         </div>
