@@ -1798,6 +1798,16 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
     }
     function sparkStrokeColor(key, points) {
       if (key === "packets") return "#d97706";
+      if (key === "mcu_temp") {
+        const values = Array.isArray(points)
+          ? points.map((item) => item && item[1]).filter((v) => Number.isFinite(v))
+          : [];
+        const recent = values.length ? values[values.length - 1] : NaN;
+        if (!Number.isFinite(recent)) return "#2f8f4e";
+        if (recent >= 950) return "#d14343";  // critical
+        if (recent >= 750) return "#d7a531";  // high
+        return "#2f8f4e";                     // normal
+      }
       if (key === "gps_satellites") return "#2f8f4e";
       if (key === "signal") return "#3b82f6";
       if (key === "noise_floor") return "#94a3b8";
@@ -1835,6 +1845,9 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
       return { min:minValue, max:maxValue };
     }
     function sparkGuideValues(key) {
+      if (key === "mcu_temp") {
+        return [750, 950];  // 75 °C, 95 °C
+      }
       if (key === "signal") {
         return [-120, -110, -100, -90, -80, -70, -60, -50, -40].map((value) => value * 4);
       }
@@ -1844,6 +1857,13 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
       return [];
     }
     function sparkBands(key) {
+      if (key === "mcu_temp") {
+        return [
+          { from:    0, to:  750, color: "rgba(47,143,78,0.12)"  },  // normal   (< 75 °C)
+          { from:  750, to:  950, color: "rgba(215,165,49,0.14)" },  // high     (75–95 °C)
+          { from:  950, to: 1250, color: "rgba(191,75,75,0.14)"  }   // critical (> 95 °C)
+        ];
+      }
       if (key === "signal") {
         return [
           { from:(-125 * 4), to:(-110 * 4), color:"rgba(191,75,75,0.14)" },
@@ -2022,7 +2042,11 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
     function getTrendSeriesOrder(summaryPayload) {
       const sensors = summaryPayload && summaryPayload.sensors ? summaryPayload.sensors : null;
       const gpsEnabled = !!(sensors && sensors.gps_enabled === true);
+      const mcuTempPresent = !!(sensors && Number.isFinite(sensors.mcu_temp_c));
       const order = ["battery", "memory", "signal", "noise_floor", "packets"];
+      if (mcuTempPresent) {
+        order.splice(2, 0, "mcu_temp");
+      }
       if (gpsEnabled) {
         order.push("gps_satellites");
       }
