@@ -225,18 +225,18 @@ const char kWebPanelLoginHtml[] PROGMEM = R"HTML(
       --text-muted:#4b5563;
       --border:rgba(0,0,0,.08);
       --surface:#ffffff;
+      --surface2:#f0f3f7;
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        color-scheme: dark;
-        --accent:#36a167;
-        --accent-hover:#49c27d;
-        --background:#222222;
-        --text:#e6eaf0;
-        --text-muted:#9aa4b2;
-        --border:rgba(255,255,255,.08);
-        --surface:#303030;
-      }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --accent:#36a167;
+      --accent-hover:#49c27d;
+      --background:#222222;
+      --text:#e6eaf0;
+      --text-muted:#9aa4b2;
+      --border:rgba(255,255,255,.08);
+      --surface:#303030;
+      --surface2:#2a2a2a;
     }
     html { min-height:100%; background:linear-gradient(180deg,var(--background),var(--surface)); background-repeat:no-repeat; background-attachment:fixed; }
     body { min-height:100vh; margin:0; display:grid; place-items:center; background:transparent; color:var(--text); font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace; }
@@ -249,12 +249,17 @@ const char kWebPanelLoginHtml[] PROGMEM = R"HTML(
     button { border:none; background:var(--accent); color:#fff; cursor:pointer; font-weight:700; }
     button:hover { background:var(--accent-hover); }
     #status { min-height:1.4em; margin-top:12px; color:#c94a4a; white-space:pre-wrap; }
+    .themebtn { background:var(--surface2,var(--background)); color:var(--text); border:1px solid var(--border); }
+    .themebtn:hover { background:var(--surface); }
   </style>
 </head>
 <body>
   <main>
     <section class="card">
-      <h1>Repeater Config</h1>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h1 style="margin:0">Repeater Config</h1>
+        <button id="themeToggle" class="themebtn" style="width:auto;min-height:unset;padding:10px 14px;">☾</button>
+      </div
       <p>Use the repeater admin password to unlock the panel.</p>
       <input id="password" type="password" placeholder="Admin password" autocomplete="current-password">
       <button id="loginBtn">Unlock</button>
@@ -262,6 +267,26 @@ const char kWebPanelLoginHtml[] PROGMEM = R"HTML(
     </section>
   </main>
   <script>
+    const rootEl = document.documentElement;
+    const themeToggleEl = document.getElementById("themeToggle");
+    function getPreferredTheme() {
+      const saved = localStorage.getItem("repeater-theme");
+      if (saved === "light" || saved === "dark") return saved;
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    function applyTheme(theme) {
+      rootEl.dataset.theme = theme;
+      themeToggleEl.textContent = theme === "dark" ? "☀" : "☾";
+      themeToggleEl.title = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+    }
+    function toggleTheme() {
+      const next = rootEl.dataset.theme === "dark" ? "light" : "dark";
+      localStorage.setItem("repeater-theme", next);
+      applyTheme(next);
+    }
+    applyTheme(getPreferredTheme());
+    themeToggleEl.onclick = toggleTheme;
+
     const statusEl = document.getElementById("status");
     function getPreferredPage() {
       const params = new URLSearchParams(window.location.search);
