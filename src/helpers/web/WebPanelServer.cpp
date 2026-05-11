@@ -7,6 +7,7 @@
 #include <esp_idf_version.h>
 #include <esp_system.h>
 #include <string.h>
+#include "Update.h"
 
 #include "../mqtt/generated/WebPanelCert.h"
 
@@ -558,7 +559,7 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
       .actions-bar { display:grid; grid-template-columns:1fr; gap:10px; }
       .actions-group { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
       .actions-group.left, .actions-group.center, .actions-group.right { justify-self:stretch; }
-      .actions-group.center { grid-template-columns:repeat(3,minmax(0,1fr)); justify-items:stretch; }
+      .actions-group.center { grid-template-columns:repeat(2,minmax(0,1fr)); justify-items:stretch; }
       .actions-group.right { grid-template-columns:repeat(3,minmax(0,1fr)); justify-items:stretch; }
       #actionsPanel .actions-group button { width:100%; }
       #actionsPanel .actions-group.center button { width:100%; min-width:0; }
@@ -591,7 +592,6 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
         </div>
         <div class="actions-group center">
           <button id="advertBtn" class="action-advert">Advert</button>
-          <button id="otaBtn" class="action-dreamy">Start OTA</button>
           <div class="btn-split" id="refreshSplitGroup">
             <button id="refreshPageBtn" class="action-dreamy">Refresh</button>
             <button id="autoRefreshBtn" class="action-dreamy">↻</button>
@@ -661,6 +661,25 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
             <input id="publicKey" readonly disabled>
             <button id="copyPublicKeyBtn" class="iconbtn" title="Copy public key">&#x2398;</button>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="otaPanel" style="display:none">
+      <h2>Firmware Update</h2>
+      <div class="stack">
+        <div class="field-card">
+          <label class="label" for="otaFile">Firmware binary (.bin)</label>
+          <div class="fieldline">
+            <input id="otaFile" type="file" accept=".bin" style="padding:8px">
+            <button id="otaUploadBtn" class="savebtn" disabled>Upload</button>
+          </div>
+        </div>
+        <div id="otaProgress" style="display:none">
+          <div style="background:var(--surface2);border-radius:8px;overflow:hidden;height:8px;margin-bottom:8px">
+            <div id="otaProgressBar" style="height:100%;width:0%;background:var(--accent);transition:width .2s"></div>
+          </div>
+          <div id="otaStatusMsg" style="color:var(--text-muted);font-size:13px"></div>
         </div>
       </div>
     </section>
@@ -1036,7 +1055,6 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
       const statsBtn = document.getElementById("statsPageBtn");
       const centerGroup = document.querySelector("#actionsPanel .actions-group.center");
       const advertBtn = document.getElementById("advertBtn");
-      const otaBtn = document.getElementById("otaBtn");
       const refreshSplitGroup = document.getElementById("refreshSplitGroup");
       if (appBtn) {
         appBtn.classList.toggle("active", !isStatsPage);
@@ -1049,7 +1067,6 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
         statsBtn.onclick = () => window.location.assign("/stats");
       }
       if (advertBtn) advertBtn.style.display = isStatsPage ? "none" : "";
-      if (otaBtn) otaBtn.style.display = isStatsPage ? "none" : "";
       if (refreshSplitGroup) refreshSplitGroup.style.display = isStatsPage ? "" : "none";
     }
     function toggleTheme() {
@@ -2122,6 +2139,7 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
       document.getElementById("statsPanel").style.display = show && !isStatsPage ? "none" : "none";
       document.getElementById("statsPagePanel").style.display = show && isStatsPage ? "block" : "none";
       document.getElementById("repeaterSettingsPanel").style.display = show && !isStatsPage ? "block" : "none";
+      document.getElementById("otaPanel").style.display = show && !isStatsPage ? "block" : "none";
       if (!show) {
         if (mqttIataBanner) mqttIataBanner.classList.remove("visible");
         commandQueue = Promise.resolve();
@@ -2588,13 +2606,54 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
         await runCommand("advert");
       }
     };
-    document.getElementById("otaBtn").onclick = async () => {
-      if (confirm("Start OTA mode now?")) {
-        const result = await runCommand("start ota");
-        if (result && result.ok) {
-          window.open(window.location.origin + "/update", "_blank");
+    document.getElementById("otaFile").addEventListener("change", (e) => {
+      document.getElementById("otaUploadBtn").disabled = !e.target.files || !e.target.files.length;
+    });
+
+    document.getElementById("otaUploadBtn").onclick = () => {
+      const file = document.getElementById("otaFile").files[0];
+      if (!file) return;
+      if (!confirm("Upload " + file.name + "? The device will reboot after flashing.")) return;
+
+      const progressEl = document.getElementById("otaProgress");
+      const barEl = document.getElementById("otaProgressBar");
+      const msgEl = document.getElementById("otaStatusMsg");
+      progressEl.style.display = "block";
+      document.getElementById("otaUploadBtn").disabled = true;
+      document.getElementById("otaFile").disabled = true;
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/ota");
+      xhr.setRequestHeader("X-Auth-Token", token);
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          barEl.style.width = pct + "%";
+          msgEl.textContent = "Uploading... " + pct + "%";
         }
-      }
+      };
+      xhr.onload = () => {
+        if (xhr.status === 401) {
+          redirectToLogin();
+          return;
+        }
+        if (xhr.status === 200) {
+          barEl.style.width = "100%";
+          msgEl.textContent = "Done. Device is rebooting...";
+        } else {
+          msgEl.textContent = "Failed: " + (xhr.responseText || String(xhr.status));
+          document.getElementById("otaUploadBtn").disabled = false;
+          document.getElementById("otaFile").disabled = false;
+        }
+      };
+      xhr.onerror = () => {
+        msgEl.textContent = "Network error during upload.";
+        document.getElementById("otaUploadBtn").disabled = false;
+        document.getElementById("otaFile").disabled = false;
+      };
+      xhr.send(file);
     };
     const AUTO_REFRESH_INTERVAL = 60;
     let autoRefreshCountdown = 0;
@@ -2721,7 +2780,7 @@ bool WebPanelServer::start() {
 
   httpd_ssl_config_t config = HTTPD_SSL_CONFIG_DEFAULT();
   config.httpd.max_open_sockets = 2;
-  config.httpd.max_uri_handlers = 7;
+  config.httpd.max_uri_handlers = 8;
   config.httpd.max_resp_headers = 4;
   config.httpd.backlog_conn = 0;
   config.httpd.recv_wait_timeout = 10;
@@ -2755,6 +2814,7 @@ bool WebPanelServer::start() {
   httpd_uri_t command_uri = {.uri = "/api/command", .method = HTTP_POST, .handler = &WebPanelServer::handleCommand, .user_ctx = &_route_context};
   httpd_uri_t stats_uri = {.uri = "/api/stats", .method = HTTP_GET, .handler = &WebPanelServer::handleStats, .user_ctx = &_route_context};
   httpd_uri_t update = {.uri = "/update", .method = HTTP_GET, .handler = &WebPanelServer::handleOtaRedirect, .user_ctx = &_route_context};
+  httpd_uri_t ota_uri = { .uri = "/api/ota", .method = HTTP_POST, .handler = &WebPanelServer::handleOtaUpload, .user_ctx = &_route_context };
   httpd_register_uri_handler(_server, &index_uri);
   httpd_register_uri_handler(_server, &app_uri);
   httpd_register_uri_handler(_server, &stats_page_uri);
@@ -2762,6 +2822,7 @@ bool WebPanelServer::start() {
   httpd_register_uri_handler(_server, &command_uri);
   httpd_register_uri_handler(_server, &stats_uri);
   httpd_register_uri_handler(_server, &update);
+  httpd_register_uri_handler(_server, &ota_uri);
 
   httpd_config_t redirect_config = HTTPD_DEFAULT_CONFIG();
   redirect_config.server_port = 80;
@@ -2911,6 +2972,59 @@ esp_err_t WebPanelServer::handleOtaRedirect(httpd_req_t* req) {
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   httpd_resp_set_hdr(req, "Connection", "close");
   return httpd_resp_send(req, "", 0);
+}
+
+esp_err_t WebPanelServer::handleOtaUpload(httpd_req_t* req) {
+  auto* ctx = static_cast<RouteContext*>(req->user_ctx);
+  if (ctx == nullptr || ctx->self == nullptr) {
+    return httpd_resp_send_500(req);
+  }
+  if (!ctx->self->isAuthorized(req)) {
+    return httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Unauthorized");
+  }
+
+  ctx->self->noteActivity();
+
+  int remaining = req->content_len;
+  if (remaining <= 0) {
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No content");
+  }
+
+  constexpr size_t kChunkSize = 4096;
+  char* buf = allocScratchBuffer(kChunkSize);
+  if (buf == nullptr) {
+    return httpd_resp_send_500(req);
+  }
+
+  if (!Update.begin(static_cast<size_t>(remaining), U_FLASH)) {
+    freeScratchBuffer(buf);
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Update begin failed");
+  }
+
+  while (remaining > 0) {
+    int to_read = (remaining < (int)kChunkSize) ? remaining : (int)kChunkSize;
+    int n = httpd_req_recv(req, buf, to_read);
+    if (n <= 0) {
+      Update.abort();
+      freeScratchBuffer(buf);
+      return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Read error");
+    }
+    if (Update.write(reinterpret_cast<uint8_t*>(buf), n) != (size_t)n) {
+      Update.abort();
+      freeScratchBuffer(buf);
+      return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Write error");
+    }
+    remaining -= n;
+  }
+  freeScratchBuffer(buf);
+
+  if (!Update.end()) {
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Update end failed");
+  }
+
+  (void)httpd_resp_sendstr(req, "OK");
+  vTaskDelay(pdMS_TO_TICKS(1000));
+  esp_restart();
 }
 
 esp_err_t WebPanelServer::handleLogin(httpd_req_t* req) {
