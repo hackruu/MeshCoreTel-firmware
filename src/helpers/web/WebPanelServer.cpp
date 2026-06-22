@@ -966,6 +966,65 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
 	      </div>
 	    </section>
 
+    <section class="card" id="blacklistPanel" style="display:none">
+      <h2>Blacklist</h2>
+      <div class="stack">
+        <div class="section-group">
+          <h3>PATH BLACKLIST</h3>
+          <p class="panel-note">Drop flood packets whose path contains a matching node-hash prefix (hex, 2&#8211;8 chars = 1&#8211;4 bytes).</p>
+          <div class="field-card">
+            <label class="label">Current entries</label>
+            <div class="inline-actions">
+              <textarea id="pathBlList" readonly rows="3" placeholder="-none-" style="resize:none;cursor:default;flex:1"></textarea>
+              <button class="iconbtn" id="pathBlRefreshBtn" title="Refresh">&#8635;</button>
+            </div>
+          </div>
+          <div class="field-card">
+            <label class="label" for="pathBlInput">Hex prefix (2&#8211;8 chars)</label>
+            <div class="inline-actions">
+              <input id="pathBlInput" placeholder="e.g. a1b2c3d4" maxlength="8">
+              <button class="savebtn" id="pathBlAddBtn">Add</button>
+              <button class="savebtn" id="pathBlRemBtn">Rem</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <button class="savebtn action-caution" id="pathBlClearBtn" style="flex:1">Clear all</button>
+          </div>
+        </div>
+        <div class="section-group">
+          <h3>CHANNEL BLACKLIST</h3>
+          <p class="panel-note">Drop group-channel packets by channel-hash prefix (hex) or channel name (#name).</p>
+          <div class="field-card">
+            <label class="label">Current entries</label>
+            <div class="inline-actions">
+              <textarea id="chanBlList" readonly rows="3" placeholder="-none-" style="resize:none;cursor:default;flex:1"></textarea>
+              <button class="iconbtn" id="chanBlRefreshBtn" title="Refresh">&#8635;</button>
+            </div>
+          </div>
+          <div class="field-card">
+            <label class="label" for="chanBlInput">Hex prefix or #ChannelName</label>
+            <div class="inline-actions">
+              <input id="chanBlInput" placeholder="hex or #ChannelName">
+              <button class="savebtn" id="chanBlAddBtn">Add</button>
+              <button class="savebtn" id="chanBlRemBtn">Rem</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <button class="savebtn action-caution" id="chanBlClearBtn" style="flex:1">Clear all</button>
+          </div>
+        </div>
+        <div class="section-group">
+          <h3>LOAD FROM WEB</h3>
+          <div class="field-card">
+            <label class="label" for="blLoadUrl">URL</label>
+            <input id="blLoadUrl" placeholder="https://meshcore.hackru.ru/m/blacklist/MOW.json" style="width:100%">
+          </div>
+          <button class="savebtn" id="blLoadWebBtn" style="width:100%;margin-top:4px">Load from web</button>
+          <div id="blStatus" class="panel-note" style="min-height:1.4em;margin-top:6px"></div>
+        </div>
+      </div>
+    </section>
+
     <section class="card" id="statsPanel" style="display:none">
       <h2>Stats</h2>
       <div class="quick" style="margin-bottom:12px">
@@ -2150,6 +2209,7 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
       document.getElementById("cliPanel").style.display = show && !isStatsPage ? "block" : "none";
       document.getElementById("quickCommandsPanel").style.display = show && !isStatsPage ? "block" : "none";
       document.getElementById("mqttSettingsPanel").style.display = show && !isStatsPage ? "block" : "none";
+      document.getElementById("blacklistPanel").style.display = show && !isStatsPage ? "block" : "none";
       document.getElementById("infoPanel").style.display = show && !isStatsPage ? "block" : "none";
       document.getElementById("statsPanel").style.display = show && !isStatsPage ? "none" : "none";
       document.getElementById("statsPagePanel").style.display = show && isStatsPage ? "block" : "none";
@@ -2245,6 +2305,56 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
       if (inputId === "nodeName") {
         updatePanelTitle(value);
       }
+    }
+    async function fetchRemoteJson(url) {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    }
+    function validateBlacklistJson(data) {
+      if (typeof data !== "object" || data === null) return "Not a JSON object";
+      if (typeof data.blacklist !== "object" || data.blacklist === null) return "Missing 'blacklist' key";
+      const { path = [], chan = [] } = data.blacklist;
+      if (!Array.isArray(path)) return "'blacklist.path' must be an array";
+      if (!Array.isArray(chan))  return "'blacklist.chan' must be an array";
+      for (const e of path) if (typeof e !== "string") return "'blacklist.path' entries must be strings";
+      for (const e of chan)  if (typeof e !== "string") return "'blacklist.chan' entries must be strings";
+      if (path.length === 0 && chan.length === 0) return "Both 'path' and 'chan' arrays are empty";
+      return null;
+    }
+    async function loadBlacklistDisplay(cmd, textareaId) {
+      const result = await runCommand(cmd, { recordHistory: false });
+      if (!result.ok) return;
+      const value = parseReplyValue(result.text);
+      document.getElementById(textareaId).value = (value === "-none-" || !value) ? "" : value;
+    }
+    async function applyRemoteBlacklist() {
+      const blStatusEl = document.getElementById("blStatus");
+      const url = (document.getElementById("blLoadUrl").value || "").trim();
+      if (!url) { blStatusEl.textContent = "Enter a URL first."; return; }
+      blStatusEl.textContent = "Fetching…";
+      let data;
+      try {
+        data = await fetchRemoteJson(url);
+      } catch (e) {
+        blStatusEl.textContent = "Fetch failed: " + e.message;
+        return;
+      }
+      const err = validateBlacklistJson(data);
+      if (err) { blStatusEl.textContent = "Invalid JSON: " + err; return; }
+      const { path = [], chan = [] } = data.blacklist;
+      let applied = 0, failed = 0;
+      for (const e of path) {
+        const r = await runCommand("blacklist path add " + e, { recordHistory: false });
+        r.ok ? applied++ : failed++;
+      }
+      for (const e of chan) {
+        const r = await runCommand("blacklist chan add " + e, { recordHistory: false });
+        r.ok ? applied++ : failed++;
+      }
+      await loadBlacklistDisplay("blacklist path list", "pathBlList");
+      await loadBlacklistDisplay("blacklist chan list", "chanBlList");
+      blStatusEl.textContent = `Applied ${applied} entr${applied === 1 ? "y" : "ies"}${failed ? `, ${failed} failed` : ""}.`;
     }
     async function copyToClipboard(value, successMessage) {
       try {
@@ -2485,6 +2595,43 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
 	    document.querySelectorAll("[data-cmd]").forEach((btn) => btn.onclick = () => runCommand(btn.dataset.cmd));
 	    document.querySelectorAll("[data-prefix]").forEach((btn) => btn.onclick = () => runPrefixed(btn.dataset.prefix, btn.dataset.input));
 	    document.querySelectorAll("[data-load-cmd]").forEach((btn) => btn.onclick = () => loadField(btn.dataset.loadCmd, btn.dataset.loadInput, btn.dataset.loadFormat));
+	    document.getElementById("pathBlRefreshBtn").onclick = () => loadBlacklistDisplay("blacklist path list", "pathBlList");
+	    document.getElementById("pathBlAddBtn").onclick = async () => {
+	      const v = document.getElementById("pathBlInput").value.trim();
+	      if (!v) return;
+	      const r = await runCommand("blacklist path add " + v);
+	      if (r.ok) { document.getElementById("pathBlInput").value = ""; await loadBlacklistDisplay("blacklist path list", "pathBlList"); }
+	    };
+	    document.getElementById("pathBlRemBtn").onclick = async () => {
+	      const v = document.getElementById("pathBlInput").value.trim();
+	      if (!v) return;
+	      const r = await runCommand("blacklist path rem " + v);
+	      if (r.ok) { document.getElementById("pathBlInput").value = ""; await loadBlacklistDisplay("blacklist path list", "pathBlList"); }
+	    };
+	    document.getElementById("pathBlClearBtn").onclick = async () => {
+	      if (!confirm("Clear all path blacklist entries?")) return;
+	      const r = await runCommand("blacklist path clear");
+	      if (r.ok) await loadBlacklistDisplay("blacklist path list", "pathBlList");
+	    };
+	    document.getElementById("blLoadWebBtn").onclick = () => applyRemoteBlacklist();
+	    document.getElementById("chanBlRefreshBtn").onclick = () => loadBlacklistDisplay("blacklist chan list", "chanBlList");
+	    document.getElementById("chanBlAddBtn").onclick = async () => {
+	      const v = document.getElementById("chanBlInput").value.trim();
+	      if (!v) return;
+	      const r = await runCommand("blacklist chan add " + v);
+	      if (r.ok) { document.getElementById("chanBlInput").value = ""; await loadBlacklistDisplay("blacklist chan list", "chanBlList"); }
+	    };
+	    document.getElementById("chanBlRemBtn").onclick = async () => {
+	      const v = document.getElementById("chanBlInput").value.trim();
+	      if (!v) return;
+	      const r = await runCommand("blacklist chan rem " + v);
+	      if (r.ok) { document.getElementById("chanBlInput").value = ""; await loadBlacklistDisplay("blacklist chan list", "chanBlList"); }
+	    };
+	    document.getElementById("chanBlClearBtn").onclick = async () => {
+	      if (!confirm("Clear all channel blacklist entries?")) return;
+	      const r = await runCommand("blacklist chan clear");
+	      if (r.ok) await loadBlacklistDisplay("blacklist chan list", "chanBlList");
+	    };
 	    const mqttIataInput = document.getElementById("mqttIata");
 	    if (mqttIataInput) {
 	      mqttIataInput.addEventListener("input", () => {
@@ -2770,6 +2917,15 @@ const char kWebPanelAppHtml[] PROGMEM = R"HTML(
           () => loadBrokerState("get mqtt.letsmesh-eu", "mqttLetsmeshEu", quiet),
           () => loadBrokerState("get mqtt.letsmesh-us", "mqttLetsmeshUs", quiet)
         ]);
+        await loadSection("Loading blacklists...", [
+          () => loadBlacklistDisplay("blacklist path list", "pathBlList"),
+          () => loadBlacklistDisplay("blacklist chan list", "chanBlList"),
+        ]);
+        const blLoadUrlEl = document.getElementById("blLoadUrl");
+        if (blLoadUrlEl && !blLoadUrlEl.value) {
+          const iata = (document.getElementById("mqttIata").value || "").trim().toUpperCase();
+          if (iata) blLoadUrlEl.value = `https://meshcore.hackru.ru/m/blacklist/${iata}.json`;
+        }
         statusEl.textContent = "Ready";
       } catch (error) {
         if (!token) {
